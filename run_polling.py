@@ -1,4 +1,11 @@
 # run_polling.py: local development entry point.
-# Starts the bot in long-polling mode (no webhook/server needed) — run with
-# `python run_polling.py` during development.
-# Intentionally empty for now — no bot logic yet.
+# Wires the handlers onto the shared bot instance and starts long-polling
+# (no webhook/server needed). Run with `python run_polling.py`.
+
+from app.bot import bot
+from app.handlers import register_handlers
+
+if __name__ == "__main__":
+    register_handlers(bot)
+    print("Bot is polling... Press Ctrl+C to stop.")
+    bot.infinity_polling()
