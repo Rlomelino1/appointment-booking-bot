@@ -3,8 +3,11 @@
 # No telebot imports, no SQL — data access goes through the injected repo,
 # which lets tests pass a fake repository.
 
+import logging
 import re
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,6 +36,19 @@ MAX_SLOTS_SHOWN = 10
 
 def handle_message(user_id, text, repo, user_name="Guest"):
     """Route one incoming message through the state machine, return a Reply."""
+    state_before = _current_state(repo, user_id)
+    reply = _dispatch(user_id, text, repo, user_name)
+    state_after = _current_state(repo, user_id)
+    logger.info("user %s: state %s -> %s", user_id, state_before, state_after)
+    return reply
+
+
+def _current_state(repo, user_id):
+    row = repo.get_state(user_id)
+    return row["state"] if row else "idle"
+
+
+def _dispatch(user_id, text, repo, user_name):
     text = (text or "").strip()
 
     # Global commands win over state logic in every state.

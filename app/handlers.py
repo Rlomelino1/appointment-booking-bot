@@ -4,11 +4,15 @@
 # Telegram send: keyboard rows become a ReplyKeyboardMarkup, keyboard=None
 # removes any previous keyboard.
 
+import logging
+
 from telebot import TeleBot
 from telebot.types import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from app import repository
 from app.dialogue import handle_message
+
+logger = logging.getLogger(__name__)
 
 
 def _display_name(message: Message) -> str:
@@ -30,12 +34,24 @@ def register_handlers(bot: TeleBot) -> None:
 
     @bot.message_handler(content_types=["text"])
     def handle_text(message: Message) -> None:
-        reply = handle_message(
-            message.from_user.id,
-            message.text,
-            repository,
-            user_name=_display_name(message),
-        )
+        user_id = message.from_user.id
+        try:
+            reply = handle_message(
+                user_id,
+                message.text,
+                repository,
+                user_name=_display_name(message),
+            )
+        except Exception:
+            # Never leave the user hanging on an internal error, and never
+            # rely on telebot to report it for us.
+            logger.exception("Error handling message from user %s", user_id)
+            bot.send_message(
+                message.chat.id,
+                "Sorry, something went wrong on our side. "
+                "Please try again, or send /start.",
+            )
+            return
         bot.send_message(
             message.chat.id, reply.text, reply_markup=_to_markup(reply.keyboard)
         )
