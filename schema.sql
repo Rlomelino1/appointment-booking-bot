@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS appointments (
     status           text NOT NULL DEFAULT 'confirmed'
 );
 
+-- Per-user preferences; a row exists only once the user has set something.
+CREATE TABLE IF NOT EXISTS user_settings (
+    telegram_user_id bigint PRIMARY KEY,
+    timezone         text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS conversation_state (
     telegram_user_id bigint PRIMARY KEY,
     state            text NOT NULL,

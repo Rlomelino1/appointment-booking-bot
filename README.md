@@ -22,18 +22,18 @@ Bot:  Which service would you like?
 
 You:  1
 Bot:  Pick a time:
-      1. Mon 27 Jul, 14:00
-      2. Tue 28 Jul, 09:00
+      1. Mon 27 Jul, 14:00 (UTC-3)
+      2. Tue 28 Jul, 09:00 (UTC-3)
 
 You:  1
 Bot:  Here's your booking:
       • Service: Haircut
-      • When: Mon 27 Jul, 14:00
+      • When: Mon 27 Jul, 14:00 (UTC-3)
       • Name: Ana Silva
       [Confirm] [Change slot] [Cancel]
 
 You:  Confirm
-Bot:  ✅ Booked! Haircut on Mon 27 Jul, 14:00 under Ana Silva.
+Bot:  ✅ Booked! Haircut on Mon 27 Jul, 14:00 (UTC-3) under Ana Silva.
 ```
 
 `/mybookings` lists confirmed appointments and lets the user cancel one (with
@@ -97,6 +97,20 @@ a Telegram update. The webhook is therefore mounted at `/webhook/<secret>`,
 where the secret is a random 256-bit string known only to Telegram (via
 `setWebhook`) and the server. The comparison uses `hmac.compare_digest` to
 avoid timing side-channels; wrong secrets get a 403 and are never parsed.
+
+**Store UTC, display local time.**
+All timestamps are stored in UTC (`timestamptz`); conversion to human time
+happens only at display, in a single formatting function. Each user can pick
+their own display timezone with `/timezone` (presets or any IANA name,
+validated with `zoneinfo` and stored in `user_settings`); without a setting,
+a `BUSINESS_TIMEZONE` env var (default `America/Sao_Paulo`) applies. Every
+rendered time carries its zone — e.g. `Fri 31 Jul, 07:00 (UTC-3)` — and
+admin-typed slot times are interpreted as business-timezone local and
+converted to UTC before storage, so the database never contains an ambiguous
+timestamp. The suffix shows tzdata's letter
+abbreviation where one exists (CET, PST); for zones where the IANA database
+dropped abbreviations (Brazil's BRT was retired in 2019) it falls back to the
+plain UTC offset.
 
 **Polling in dev, webhook in prod.**
 Long-polling (`run_polling.py`) needs no public URL, so local development

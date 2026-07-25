@@ -66,6 +66,32 @@ def clear_state(telegram_user_id):
             )
 
 
+# --- user settings ----------------------------------------------------------
+
+def get_user_timezone(telegram_user_id):
+    """Return the user's saved IANA timezone name, or None."""
+    rows = _query(
+        "SELECT timezone FROM user_settings WHERE telegram_user_id = %s",
+        (telegram_user_id,),
+    )
+    return rows[0]["timezone"] if rows else None
+
+
+def set_user_timezone(telegram_user_id, timezone_name):
+    """Upsert the user's display timezone (an IANA name, validated upstream)."""
+    with closing(get_connection()) as conn:
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_settings (telegram_user_id, timezone)
+                VALUES (%s, %s)
+                ON CONFLICT (telegram_user_id)
+                DO UPDATE SET timezone = EXCLUDED.timezone
+                """,
+                (telegram_user_id, timezone_name),
+            )
+
+
 # --- services & slots -------------------------------------------------------
 
 def list_services():

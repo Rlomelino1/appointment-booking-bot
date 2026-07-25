@@ -3,7 +3,7 @@
 # no Telegram. States are reached by driving real messages through
 # handle_message, so these tests exercise the same paths users do.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -11,8 +11,10 @@ from app.dialogue import handle_message
 from tests.fake_repository import FakeRepository
 
 USER = 111
-NOW = datetime(2026, 7, 24, 9, 0)  # a Friday
-SLOT_LABEL = "Mon 27 Jul, 14:00"
+NOW = datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc)  # a Friday
+# Slots are stored in UTC and displayed in BUSINESS_TIMEZONE
+# (default America/Sao_Paulo, UTC-3): 17:00 UTC renders as 14:00.
+SLOT_LABEL = "Mon 27 Jul, 14:00 (UTC-3)"
 
 
 @pytest.fixture
@@ -20,7 +22,7 @@ def repo():
     r = FakeRepository()
     haircut = r.add_service("Haircut", 30)
     massage = r.add_service("Massage", 60)
-    r.add_slot(haircut, NOW + timedelta(days=3, hours=5))  # Mon 27 Jul, 14:00
+    r.add_slot(haircut, NOW + timedelta(days=3, hours=8))  # Mon 27 Jul, 17:00 UTC
     r.add_slot(haircut, NOW + timedelta(days=4))
     r.add_slot(massage, NOW + timedelta(days=5))
     return r
@@ -277,6 +279,84 @@ def test_unknown_state_row_treated_as_idle(repo):
     assert state_of(repo) == "choosing_service"
 
 
+# --- timezone selection ---------------------------------------------------------
+
+def test_timezone_preset_selection_persists(repo):
+    reply = send(repo, "/timezone")
+    assert "Pick a timezone" in reply.text
+    assert ["São Paulo", "Lisbon"] in reply.keyboard
+    assert state_of(repo) == "choosing_timezone"
+
+    reply = send(repo, "London")
+    assert "Europe/London" in reply.text
+    assert repo.user_timezones[USER] == "Europe/London"
+    assert state_of(repo) == "idle"
+
+
+def test_timezone_other_accepts_typed_iana_name(repo):
+    send(repo, "/timezone")
+    reply = send(repo, "Other")
+    assert "IANA" in reply.text
+    assert state_of(repo) == "typing_timezone"
+
+    reply = send(repo, "Asia/Kolkata")
+    assert "Asia/Kolkata" in reply.text
+    assert repo.user_timezones[USER] == "Asia/Kolkata"
+    assert state_of(repo) == "idle"
+
+
+@pytest.mark.parametrize("bad_name", [
+    "Mars/OlympusMons", "not a timezone", "12345", "",
+])
+def test_timezone_typed_invalid_reprompts(repo, bad_name):
+    send(repo, "/timezone")
+    send(repo, "Other")
+
+    reply = send(repo, bad_name)
+
+    assert "IANA name" in reply.text  # helpful: says what's expected
+    assert USER not in repo.user_timezones  # nothing saved
+    assert state_of(repo) == "typing_timezone"  # can just try again
+
+
+def test_timezone_menu_unknown_pick_reprompts(repo):
+    send(repo, "/timezone")
+    reply = send(repo, "Tokyo")
+    assert "pick one of the options" in reply.text.lower()
+    assert USER not in repo.user_timezones
+    assert state_of(repo) == "choosing_timezone"
+
+
+def test_formatting_uses_saved_timezone_else_fallback(repo):
+    # No setting saved: business-timezone fallback (America/Sao_Paulo, UTC-3).
+    send(repo, "book")
+    reply = send(repo, "1")
+    assert f"1. {SLOT_LABEL}" in reply.text  # 17:00Z -> 14:00 (UTC-3)
+    send(repo, "/cancel")
+
+    # Saved timezone wins: 17:00Z -> 22:30 in Asia/Kolkata.
+    send(repo, "/timezone")
+    send(repo, "Other")
+    send(repo, "Asia/Kolkata")
+    send(repo, "book")
+    reply = send(repo, "1")
+    assert "1. Mon 27 Jul, 22:30 (IST)" in reply.text
+
+
+def test_dst_sensitive_abbreviation_london(repo):
+    haircut = next(s["id"] for s in repo.services if s["name"] == "Haircut")
+    repo.add_slot(haircut, datetime(2027, 1, 15, 12, 0, tzinfo=timezone.utc))
+    send(repo, "/timezone")
+    send(repo, "London")
+
+    send(repo, "book")
+    reply = send(repo, "1")
+
+    # July slot: UTC+1 with DST -> 18:00 (BST); January slot: UTC+0 -> (GMT).
+    assert "Mon 27 Jul, 18:00 (BST)" in reply.text
+    assert "Fri 15 Jan, 12:00 (GMT)" in reply.text
+
+
 # --- admin: permission check --------------------------------------------------
 
 ADMIN = 999
@@ -333,10 +413,12 @@ def test_addslot_creates_future_slot(repo):
 
     reply = send_as(repo, ADMIN, "2030-08-01 14:00")
 
-    assert "Added: Haircut — Thu 1 Aug, 14:00" in reply.text
+    # typed as Sao Paulo local time, echoed back the same way...
+    assert "Added: Haircut — Thu 1 Aug, 14:00 (UTC-3)" in reply.text
     assert len(repo.slots) == slots_before + 1
     created = max(repo.slots.values(), key=lambda s: s["id"])
-    assert created["starts_at"] == datetime(2030, 8, 1, 14, 0)
+    # ...but stored in UTC (14:00-03:00 == 17:00Z)
+    assert created["starts_at"] == datetime(2030, 8, 1, 17, 0, tzinfo=timezone.utc)
     assert created["is_booked"] is False
     # stays in the state so more slots can be added back to back
     assert state_of(repo, ADMIN) == "admin_typing_datetime"

@@ -32,7 +32,10 @@ db.DATABASE_URL = TEST_DATABASE_URL  # belt and braces if app.config loaded earl
 
 USER = 111
 SCHEMA_SQL = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()
-DROP_SQL = "DROP TABLE IF EXISTS appointments, conversation_state, slots, services CASCADE"
+DROP_SQL = (
+    "DROP TABLE IF EXISTS "
+    "appointments, conversation_state, user_settings, slots, services CASCADE"
+)
 
 
 def execute(sql, params=()):

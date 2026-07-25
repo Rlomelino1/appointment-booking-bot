@@ -20,10 +20,11 @@ class FakeRepository:
     AppointmentNotFoundError = AppointmentNotFoundError
 
     def __init__(self):
-        self.states = {}        # user_id -> {"state": str, "context": dict}
-        self.services = []      # {"id", "name", "duration_minutes"}
-        self.slots = {}         # slot_id -> {"id", "service_id", "starts_at", "is_booked"}
-        self.appointments = []  # rows shaped like the appointments table
+        self.states = {}          # user_id -> {"state": str, "context": dict}
+        self.services = []        # {"id", "name", "duration_minutes"}
+        self.slots = {}           # slot_id -> {"id", "service_id", "starts_at", "is_booked"}
+        self.appointments = []    # rows shaped like the appointments table
+        self.user_timezones = {}  # user_id -> IANA name (user_settings table)
         self._next_id = 1
 
     # --- seeding helpers (test-only, no counterpart in the real module) -----
@@ -58,6 +59,14 @@ class FakeRepository:
 
     def clear_state(self, telegram_user_id):
         self.states.pop(telegram_user_id, None)
+
+    # --- user settings --------------------------------------------------------
+
+    def get_user_timezone(self, telegram_user_id):
+        return self.user_timezones.get(telegram_user_id)
+
+    def set_user_timezone(self, telegram_user_id, timezone_name):
+        self.user_timezones[telegram_user_id] = timezone_name
 
     # --- services & slots ----------------------------------------------------
 

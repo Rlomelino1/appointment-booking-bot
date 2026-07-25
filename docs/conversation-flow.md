@@ -18,6 +18,8 @@ Reply — no Telegram calls, no SQL of its own.
 | `post_booking`      | Booking done, offered "Book another?"      | `{}`                                    |
 | `managing_bookings` | Appointment list shown, awaiting a pick    | `{"appointment_options": [ids]}`        |
 | `confirm_cancel`    | Asked "really cancel #N?"                  | `{"appointment_id": n}`                 |
+| `choosing_timezone` | Timezone keyboard shown, awaiting a pick   | `{}`                                    |
+| `typing_timezone`   | Awaiting a typed IANA timezone name        | `{}`                                    |
 | `admin_choosing_service` | Admin: /addslot service list shown, awaiting a pick | `{"service_options": [ids]}` |
 | `admin_typing_datetime`  | Admin: awaiting the new slot's date/time             | `{"service_id": n}`          |
 
@@ -37,6 +39,25 @@ the user actually saw, even if the database contents change in between.
 | `/start`      | Clear state → `idle`; greet; show main menu keyboard: **Book an appointment** / **My bookings** / **Help** |
 | `/cancel`     | Clear state → `idle`; reply "Okay, cancelled."                |
 | `/mybookings` | List the user's confirmed appointments → `managing_bookings`  |
+| `/timezone`   | Show the timezone picker keyboard → `choosing_timezone`       |
+
+## Timezone selection
+
+All timestamps are stored in UTC. Displays convert to the user's saved
+timezone (`user_settings.timezone`) when present, else to `BUSINESS_TIMEZONE`
+(default America/Sao_Paulo) — one formatting function does this everywhere,
+and always appends the zone, e.g. "Mon 27 Jul, 14:00 (UTC-3)".
+
+1. `/timezone` → shows the current setting and a keyboard:
+   **São Paulo / Lisbon / London / New York / UTC / Other** → `choosing_timezone`.
+2. **choosing_timezone**
+   - a preset → save its IANA name → "Saved — times will be shown in …" → `idle`.
+   - **Other** → "Type an IANA timezone name…" → `typing_timezone`.
+   - anything else → fallback re-prompt with the keyboard.
+3. **typing_timezone** — input validated with `zoneinfo.ZoneInfo`
+   (case-sensitive, so this state receives the user's original text):
+   - valid → save → `idle`.
+   - invalid → helpful re-prompt naming the expected format, state unchanged.
 
 ## Admin commands (checked after global commands, before state logic)
 
@@ -54,7 +75,8 @@ The commands are `/addslot`, `/slots`, `/appointments`.
   → a number within range → "Send the date and time … format: 2026-08-01 14:00"
   → `admin_typing_datetime` with `service_id`
   → input must parse as `YYYY-MM-DD HH:MM` **and** be in the future, else a
-    re-prompt (state unchanged)
+    re-prompt (state unchanged); the typed time is interpreted as
+    business-timezone local time and stored as UTC
   → on success the slot is created and the state **stays**
     `admin_typing_datetime`, so several slots can be added back to back;
     `/cancel` finishes.
@@ -79,7 +101,10 @@ input and never stays silent.
 2. **choosing_service** — a number within range
    → fetch available future slots for that service
    → if none: "No free slots for this service right now", re-show services, stay `choosing_service` (refresh `service_options`)
-   → else show numbered slots formatted "Mon 27 Jul, 14:00" (max 10, soonest first)
+   → else show numbered slots (max 10, soonest first) formatted in the
+     user's display timezone (see "Timezone selection"),
+     e.g. "Mon 27 Jul, 14:00 (UTC-3)" — storage is always UTC, conversion
+     happens only at display time in one formatting function
    → `choosing_slot` with `service_id` + `slot_options`.
 
 3. **choosing_slot** — a number within range
@@ -106,7 +131,7 @@ input and never stays silent.
 1. `/mybookings` (or "My bookings" menu button)
    → fetch the user's confirmed appointments
    → if none: "You have no bookings yet." → `idle`
-   → else numbered list ("1. Haircut — Mon 27 Jul, 14:00") with prompt
+   → else numbered list ("1. Haircut — Mon 27 Jul, 14:00 (UTC-3)") with prompt
      "Send a number to cancel a booking, or /start for the menu"
    → `managing_bookings` with `appointment_options`.
 
