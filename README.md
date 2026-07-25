@@ -1,66 +1,125 @@
 # Appointment Booking Bot
 
-A Telegram bot for booking appointments, built with pyTelegramBotAPI and backed by PostgreSQL. Users interact with the bot through a guided conversation to pick a service, choose an available date and time, and confirm their booking. It runs in long-polling mode for local development (`run_polling.py`) and as a Flask webhook app served by gunicorn in production (`wsgi.py`).
+A Telegram bot that walks users through booking an appointment — pick a service, pick a time, confirm — with race-safe booking guaranteed at the database level.
+
+**Live bot: [t.me/ApBookingBot](https://t.me/ApBookingBot)**
+
+Python 3.12 · Flask · pyTelegramBotAPI · PostgreSQL (Neon) · pytest · Render
+
+## Demo
+
+Every step is driven by tappable reply-keyboard buttons; free text works too.
+
+```
+You:  /start
+Bot:  Hi! I can book appointments for you.
+      [Book an appointment] [My bookings] [Help]
+
+You:  Book an appointment
+Bot:  Which service would you like?
+      1. Haircut (30 min)
+      2. Massage (60 min)
+
+You:  1
+Bot:  Pick a time:
+      1. Mon 27 Jul, 14:00
+      2. Tue 28 Jul, 09:00
+
+You:  1
+Bot:  Here's your booking:
+      • Service: Haircut
+      • When: Mon 27 Jul, 14:00
+      • Name: Ana Silva
+      [Confirm] [Change slot] [Cancel]
+
+You:  Confirm
+Bot:  ✅ Booked! Haircut on Mon 27 Jul, 14:00 under Ana Silva.
+```
+
+`/mybookings` lists confirmed appointments and lets the user cancel one (with
+a confirmation step); `/cancel` abandons any flow; unrecognized input always
+gets a re-prompt showing the valid options — the bot never crashes on input
+and never stays silent.
+
+## Architecture
+
+```
+ Telegram servers
+        │  HTTPS POST /webhook/<secret>          (or long-polling in dev)
+        ▼
+ wsgi.py — Flask + gunicorn on Render
+        │  verifies secret, parses Update, logs it
+        ▼
+ app/handlers.py — thin Telegram glue
+        │  (user_id, text, display name) in → Reply out; no business logic
+        ▼
+ app/dialogue.py — conversation state machine
+        │  pure logic: no Telegram imports, no SQL
+        ▼
+ app/repository.py — data-access layer, all SQL lives here
+        │  transactional writes, parameterized queries
+        ▼
+ PostgreSQL (Neon)
+```
+
+Conversation state lives in a `conversation_state` table (state name + JSONB
+context per user), not in process memory — so it survives restarts and doesn't
+care which gunicorn worker handles the next message. The full state machine
+(states, transitions, edge cases) is specified in
+[docs/conversation-flow.md](docs/conversation-flow.md), which was written
+before the code and is kept authoritative.
+
+## Key design decisions
+
+**The dialogue logic is pure and dependency-injected.**
+`handle_message(user_id, text, repo) -> Reply` touches neither Telegram nor
+the database directly: the repository is passed in as a parameter, and the
+returned `Reply` is a plain dataclass (text + keyboard rows). That one seam is
+why the state machine has 51 unit tests that run in ~0.1 s against an
+in-memory fake repository — every transition, fallback, and race scenario is
+tested without a database or network. It also means the Telegram layer
+(`handlers.py`) stays a ~20-line adapter that is boring by design.
+
+**Double-booking is prevented at the SQL level, not in application code.**
+A check-then-insert in Python would race: two users can both see a slot as
+free and both book it. Instead, booking claims the slot with
+`UPDATE slots SET is_booked = true WHERE id = %s AND is_booked = false
+RETURNING id` — an atomic compare-and-set. The loser of the race gets no row
+back, the transaction (claim + appointment insert share one) writes nothing,
+and the bot apologizes and re-offers the remaining slots. Cancellation is the
+mirror image: the status flip and slot release share a transaction, and the
+`WHERE status = 'confirmed'` guard makes a double-cancel fail loudly instead
+of double-freeing the slot.
+
+**Webhook security via a secret path.**
+Anyone can POST to a public URL, and a forged request body looks exactly like
+a Telegram update. The webhook is therefore mounted at `/webhook/<secret>`,
+where the secret is a random 256-bit string known only to Telegram (via
+`setWebhook`) and the server. The comparison uses `hmac.compare_digest` to
+avoid timing side-channels; wrong secrets get a 403 and are never parsed.
+
+**Polling in dev, webhook in prod.**
+Long-polling (`run_polling.py`) needs no public URL, so local development
+works behind any firewall with zero setup. Production uses a webhook, which
+is push-based and lets one small web service handle traffic without a
+permanently open poll loop. Both entry points import the same pre-wired bot
+from `app/bot.py` (handlers registered exactly once, `threaded=False` so
+handler exceptions surface in the request that caused them, with full
+tracebacks logged to stdout for Render's log tail). Telegram allows either
+mode, never both: `scripts/set_webhook.py --delete` switches back to polling.
 
 ## Setup
 
 ```powershell
-# Create and activate a virtual environment (Windows PowerShell)
 python -m venv venv
-venv\Scripts\Activate.ps1
-
-# macOS / Linux
-# python3 -m venv venv
-# source venv/bin/activate
-
-# Install dependencies
+venv\Scripts\Activate.ps1          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-
-# Configure environment variables
-copy .env.example .env   # then edit .env and fill in BOT_TOKEN and DATABASE_URL
+copy .env.example .env             # then fill in BOT_TOKEN and DATABASE_URL
+python scripts/init_db.py          # applies schema.sql + seed.sql
+python run_polling.py
 ```
 
-The `venv/` directory is git-ignored — do not commit it.
-
-## Local dev vs production
-
-Locally the bot runs in **polling** mode (`python run_polling.py`): it repeatedly asks Telegram for new updates, which needs no public URL and works from behind any firewall. In production it runs in **webhook** mode: Telegram pushes each update to `POST {PUBLIC_URL}/webhook/{WEBHOOK_SECRET}`, served by `gunicorn wsgi:app` — set `WEBHOOK_SECRET` and `PUBLIC_URL`, then register the URL once with `python scripts/set_webhook.py`. Telegram allows either a webhook or polling, never both, so run `python scripts/set_webhook.py --delete` before switching back to local polling. `GET /health` returns `{"status": "ok"}` for Render health checks and uptime monitors.
-
-## Deployment (Render)
-
-The repo ships a `render.yaml` blueprint defining a free-plan Python web service
-(build: `pip install -r requirements.txt`, start: `gunicorn wsgi:app`, health
-check: `/health`).
-
-1. Push the repo to GitHub.
-2. In the Render dashboard: **New → Blueprint**, pick this repo, and apply.
-   Render creates the `appointment-booking-bot` web service from `render.yaml`.
-3. When prompted (the four env vars are `sync: false`, i.e. never stored in the
-   repo), fill in:
-   - `BOT_TOKEN` — from @BotFather
-   - `DATABASE_URL` — a PostgreSQL connection string (e.g. a Render PostgreSQL
-     instance's *external* URL, or any other hosted Postgres)
-   - `WEBHOOK_SECRET` — generate with
-     `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-   - `PUBLIC_URL` — the service's URL, e.g. `https://appointment-booking-bot.onrender.com`
-     (shown at the top of the service page once created)
-4. Initialize the database schema and seed data (run locally, pointing at the
-   production database): set `DATABASE_URL` in your shell or `.env`, then
-   `python scripts/init_db.py`.
-5. After the first successful deploy, register the webhook — run locally with
-   the production `BOT_TOKEN`, `PUBLIC_URL`, and `WEBHOOK_SECRET` in your
-   environment: `python scripts/set_webhook.py`. This is a one-time step;
-   redeploys keep the same URL.
-6. Verify: `https://<your-service>.onrender.com/health` returns
-   `{"status": "ok"}`, and messaging the bot on Telegram gets a reply.
-
-**Free-plan note:** Render free services spin down after ~15 minutes without
-traffic, so the first message after an idle period is answered with a delay
-while the service wakes up (Telegram retries delivery, so nothing is lost).
-Pointing an uptime monitor (e.g. UptimeRobot) at `/health` every 5 minutes
-keeps it awake.
-
-## Running tests
+## Testing
 
 ```powershell
 # Unit tests (dialogue state machine — no database or bot token needed)
@@ -71,7 +130,35 @@ $env:TEST_DATABASE_URL = "postgresql://user:pass@localhost:5432/booking_test"
 python -m pytest
 ```
 
-The repository tests in `tests/test_repository.py` run only when
-`TEST_DATABASE_URL` is set and are skipped (with a message) otherwise.
-They drop and recreate all tables around every test — point the variable at a
-dedicated scratch database, never at your real one.
+Unit tests drive real message scripts through the state machine against
+`tests/fake_repository.py` and cover the happy path, `/cancel` in every state,
+invalid input in every state (state must not change), and slot-taken races.
+Integration tests in `tests/test_repository.py` verify the transactional
+booking/cancelling behavior against a real PostgreSQL database; they run only
+when `TEST_DATABASE_URL` is set and are skipped otherwise. They drop and
+recreate all tables around every test — use a dedicated scratch database.
+
+## Deployment
+
+The repo ships a `render.yaml` blueprint defining a free-plan Python web
+service (build: `pip install -r requirements.txt`, start: `gunicorn wsgi:app`,
+health check: `GET /health`).
+
+1. In the Render dashboard: **New → Blueprint**, pick this repo, apply.
+2. Fill in the prompted env vars (all `sync: false`, never stored in the
+   repo): `BOT_TOKEN`, `DATABASE_URL` (any hosted Postgres — this deployment
+   uses Neon), `WEBHOOK_SECRET`
+   (`python -c "import secrets; print(secrets.token_urlsafe(32))"`), and
+   `PUBLIC_URL` (the service's `https://….onrender.com` URL).
+3. Initialize the database once, locally, against the production
+   `DATABASE_URL`: `python scripts/init_db.py`.
+4. After the first deploy, register the webhook once:
+   `python scripts/set_webhook.py` (with production `BOT_TOKEN`,
+   `PUBLIC_URL`, `WEBHOOK_SECRET` in the environment).
+5. Verify: `/health` returns `{"status": "ok"}` and the bot answers on
+   Telegram.
+
+Free-plan note: Render spins the service down after ~15 idle minutes; the
+first message afterwards is answered with a cold-start delay (Telegram
+retries delivery, so nothing is lost). An uptime monitor pinging `/health`
+keeps it warm.
