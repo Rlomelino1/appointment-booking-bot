@@ -21,3 +21,19 @@ copy .env.example .env   # then edit .env and fill in BOT_TOKEN and DATABASE_URL
 ```
 
 The `venv/` directory is git-ignored — do not commit it.
+
+## Running tests
+
+```powershell
+# Unit tests (dialogue state machine — no database or bot token needed)
+python -m pytest tests/test_dialogue.py
+
+# Full suite, including repository integration tests against PostgreSQL
+$env:TEST_DATABASE_URL = "postgresql://user:pass@localhost:5432/booking_test"
+python -m pytest
+```
+
+The repository tests in `tests/test_repository.py` run only when
+`TEST_DATABASE_URL` is set and are skipped (with a message) otherwise.
+They drop and recreate all tables around every test — point the variable at a
+dedicated scratch database, never at your real one.
