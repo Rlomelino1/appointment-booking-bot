@@ -36,14 +36,7 @@ class FakeRepository:
         return service_id
 
     def add_slot(self, service_id, starts_at):
-        slot_id = self._take_id()
-        self.slots[slot_id] = {
-            "id": slot_id,
-            "service_id": service_id,
-            "starts_at": starts_at,
-            "is_booked": False,
-        }
-        return slot_id
+        return self.create_slot(service_id, starts_at)
 
     def _take_id(self):
         self._next_id += 1
@@ -76,6 +69,32 @@ class FakeRepository:
             (deepcopy(s) for s in self.slots.values()
              if s["service_id"] == service_id and not s["is_booked"]),
             key=lambda s: s["starts_at"],
+        )
+
+    def create_slot(self, service_id, starts_at):
+        slot_id = self._take_id()
+        self.slots[slot_id] = {
+            "id": slot_id,
+            "service_id": service_id,
+            "starts_at": starts_at,
+            "is_booked": False,
+        }
+        return slot_id
+
+    def list_upcoming_slots(self):
+        service_names = {s["id"]: s["name"] for s in self.services}
+        return sorted(
+            ({**deepcopy(s), "service_name": service_names[s["service_id"]]}
+             for s in self.slots.values()),
+            key=lambda s: s["starts_at"],
+        )
+
+    def list_upcoming_appointments(self):
+        service_names = {s["id"]: s["name"] for s in self.services}
+        return sorted(
+            ({**deepcopy(a), "service_name": service_names[a["service_id"]]}
+             for a in self.appointments if a["status"] == "confirmed"),
+            key=lambda a: a["starts_at"],
         )
 
     # --- appointments ----------------------------------------------------------

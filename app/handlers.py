@@ -10,6 +10,7 @@ from telebot import TeleBot
 from telebot.types import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from app import repository
+from app.config import ADMIN_USER_ID
 from app.dialogue import handle_message
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def register_handlers(bot: TeleBot) -> None:
                 message.text,
                 repository,
                 user_name=_display_name(message),
+                admin_user_id=ADMIN_USER_ID,
             )
         except Exception:
             # Never leave the user hanging on an internal error, and never

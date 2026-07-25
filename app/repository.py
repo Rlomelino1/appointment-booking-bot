@@ -95,6 +95,49 @@ def list_available_slots(service_id):
     )
 
 
+def create_slot(service_id, starts_at):
+    """Insert a new bookable slot and return its id (admin /addslot)."""
+    with closing(get_connection()) as conn:
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO slots (service_id, starts_at)
+                VALUES (%s, %s)
+                RETURNING id
+                """,
+                (service_id, starts_at),
+            )
+            return cur.fetchone()[0]
+
+
+def list_upcoming_slots():
+    """Return all future slots with service name and booked flag (admin /slots)."""
+    return _query(
+        """
+        SELECT sl.id, sl.starts_at, sl.is_booked, s.name AS service_name
+        FROM slots sl
+        JOIN services s ON s.id = sl.service_id
+        WHERE sl.starts_at > now()
+        ORDER BY sl.starts_at
+        """
+    )
+
+
+def list_upcoming_appointments():
+    """Return all users' upcoming confirmed appointments (admin /appointments)."""
+    return _query(
+        """
+        SELECT a.id, a.customer_name, s.name AS service_name, sl.starts_at
+        FROM appointments a
+        JOIN services s ON s.id = a.service_id
+        JOIN slots sl ON sl.id = a.slot_id
+        WHERE a.status = 'confirmed'
+          AND sl.starts_at > now()
+        ORDER BY sl.starts_at
+        """
+    )
+
+
 # --- appointments -----------------------------------------------------------
 
 def book_slot(telegram_user_id, slot_id, customer_name):

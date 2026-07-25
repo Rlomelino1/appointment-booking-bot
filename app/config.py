@@ -27,3 +27,20 @@ DATABASE_URL = _require("DATABASE_URL")
 # without them. wsgi.py and scripts/set_webhook.py validate them on startup.
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "")
+
+
+def _optional_int(name: str):
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise RuntimeError(
+            f"{name} must be a numeric Telegram user id, got {value!r}."
+        )
+
+
+# Optional: the single Telegram user id allowed to use admin commands.
+# Unset -> admin commands reply "not configured".
+ADMIN_USER_ID = _optional_int("ADMIN_USER_ID")

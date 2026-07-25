@@ -18,6 +18,8 @@ Reply — no Telegram calls, no SQL of its own.
 | `post_booking`      | Booking done, offered "Book another?"      | `{}`                                    |
 | `managing_bookings` | Appointment list shown, awaiting a pick    | `{"appointment_options": [ids]}`        |
 | `confirm_cancel`    | Asked "really cancel #N?"                  | `{"appointment_id": n}`                 |
+| `admin_choosing_service` | Admin: /addslot service list shown, awaiting a pick | `{"service_options": [ids]}` |
+| `admin_typing_datetime`  | Admin: awaiting the new slot's date/time             | `{"service_id": n}`          |
 
 **Customer name:** never asked. It is taken automatically from the Telegram
 message metadata (`from.first_name` + `from.last_name` when present) at the
@@ -35,6 +37,30 @@ the user actually saw, even if the database contents change in between.
 | `/start`      | Clear state → `idle`; greet; show main menu keyboard: **Book an appointment** / **My bookings** / **Help** |
 | `/cancel`     | Clear state → `idle`; reply "Okay, cancelled."                |
 | `/mybookings` | List the user's confirmed appointments → `managing_bookings`  |
+
+## Admin commands (checked after global commands, before state logic)
+
+Admin access is a single Telegram user id from the optional `ADMIN_USER_ID`
+env var, injected into `handle_message` as a parameter (like the repo).
+The commands are `/addslot`, `/slots`, `/appointments`.
+
+| Sender                       | Effect                                                     |
+|------------------------------|------------------------------------------------------------|
+| `ADMIN_USER_ID` unset        | "Admin commands are not configured on this bot."           |
+| the admin                    | Command runs (below)                                       |
+| anyone else                  | Falls through to the current state's normal fallback — the commands' existence is never revealed |
+
+- `/addslot` → numbered service list → `admin_choosing_service`
+  → a number within range → "Send the date and time … format: 2026-08-01 14:00"
+  → `admin_typing_datetime` with `service_id`
+  → input must parse as `YYYY-MM-DD HH:MM` **and** be in the future, else a
+    re-prompt (state unchanged)
+  → on success the slot is created and the state **stays**
+    `admin_typing_datetime`, so several slots can be added back to back;
+    `/cancel` finishes.
+- `/slots` → all upcoming slots as "{when} — {service} — booked/free" → `idle`.
+- `/appointments` → all users' upcoming confirmed appointments as
+  "{when} — {service} — {customer name}" → `idle`.
 
 ## Fallback (every state)
 

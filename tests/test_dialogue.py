@@ -30,8 +30,8 @@ def send(repo, text):
     return handle_message(USER, text, repo, user_name="Ana Silva")
 
 
-def state_of(repo):
-    row = repo.get_state(USER)
+def state_of(repo, user_id=USER):
+    row = repo.get_state(user_id)
     return row["state"] if row else "idle"
 
 
@@ -275,3 +275,131 @@ def test_unknown_state_row_treated_as_idle(repo):
     reply = send(repo, "book")
     assert "Which service" in reply.text
     assert state_of(repo) == "choosing_service"
+
+
+# --- admin: permission check --------------------------------------------------
+
+ADMIN = 999
+ADMIN_COMMANDS = ["/addslot", "/slots", "/appointments"]
+
+
+def send_as(repo, user_id, text, admin_user_id=ADMIN):
+    return handle_message(
+        user_id, text, repo, user_name="Ana Silva", admin_user_id=admin_user_id
+    )
+
+
+@pytest.mark.parametrize("command", ADMIN_COMMANDS)
+def test_non_admin_gets_idle_fallback_not_a_reveal(repo, command):
+    reply = send_as(repo, USER, command)  # USER != ADMIN
+    assert "didn't catch that" in reply.text
+    assert "admin" not in reply.text.lower()
+    assert state_of(repo) == "idle"
+
+
+@pytest.mark.parametrize("command", ADMIN_COMMANDS)
+def test_non_admin_mid_flow_gets_state_fallback(repo, command):
+    drive_to(repo, "choosing_service")
+    reply = send_as(repo, USER, command)
+    assert "between 1 and 2" in reply.text  # choosing_service's own fallback
+    assert "admin" not in reply.text.lower()
+    assert state_of(repo) == "choosing_service"
+
+
+@pytest.mark.parametrize("command", ADMIN_COMMANDS)
+def test_admin_commands_unconfigured(repo, command):
+    reply = send_as(repo, USER, command, admin_user_id=None)
+    assert "not configured" in reply.text
+
+
+def test_admin_id_must_match_exactly(repo):
+    reply = send_as(repo, ADMIN, "/addslot", admin_user_id=ADMIN)
+    assert "Add a slot for which service?" in reply.text
+    assert state_of(repo, ADMIN) == "admin_choosing_service"
+
+
+# --- admin: /addslot flow and datetime validation ---------------------------
+
+def drive_admin_to_datetime(repo):
+    send_as(repo, ADMIN, "/addslot")
+    reply = send_as(repo, ADMIN, "1")  # Haircut
+    assert "2026-08-01 14:00" in reply.text  # format example shown
+    assert state_of(repo, ADMIN) == "admin_typing_datetime"
+
+
+def test_addslot_creates_future_slot(repo):
+    drive_admin_to_datetime(repo)
+    slots_before = len(repo.slots)
+
+    reply = send_as(repo, ADMIN, "2030-08-01 14:00")
+
+    assert "Added: Haircut — Thu 1 Aug, 14:00" in reply.text
+    assert len(repo.slots) == slots_before + 1
+    created = max(repo.slots.values(), key=lambda s: s["id"])
+    assert created["starts_at"] == datetime(2030, 8, 1, 14, 0)
+    assert created["is_booked"] is False
+    # stays in the state so more slots can be added back to back
+    assert state_of(repo, ADMIN) == "admin_typing_datetime"
+
+
+@pytest.mark.parametrize("bad_datetime", [
+    "tomorrow",
+    "2030-08-01",        # date only
+    "14:00",             # time only
+    "2030-13-01 14:00",  # month 13
+    "01-08-2030 14:00",  # wrong field order
+    "2030-08-01 14:00:00",  # seconds not in format
+])
+def test_addslot_rejects_unparseable_datetime(repo, bad_datetime):
+    drive_admin_to_datetime(repo)
+    before = repo.get_state(ADMIN)
+    slots_before = len(repo.slots)
+
+    reply = send_as(repo, ADMIN, bad_datetime)
+
+    assert "2026-08-01 14:00" in reply.text  # re-prompt repeats the format
+    assert len(repo.slots) == slots_before  # nothing created
+    assert repo.get_state(ADMIN) == before
+
+
+def test_addslot_rejects_past_datetime(repo):
+    drive_admin_to_datetime(repo)
+    slots_before = len(repo.slots)
+
+    reply = send_as(repo, ADMIN, "2020-01-01 10:00")
+
+    assert "in the past" in reply.text
+    assert len(repo.slots) == slots_before
+    assert state_of(repo, ADMIN) == "admin_typing_datetime"
+
+
+def test_cancel_exits_addslot_flow(repo):
+    drive_admin_to_datetime(repo)
+    reply = send_as(repo, ADMIN, "/cancel")
+    assert reply.text == "Okay, cancelled."
+    assert state_of(repo, ADMIN) == "idle"
+
+
+# --- admin: /slots and /appointments -----------------------------------------
+
+def test_admin_slots_shows_booked_and_free(repo):
+    drive_to(repo, "post_booking")  # USER books the first Haircut slot
+    reply = send_as(repo, ADMIN, "/slots")
+    assert "Upcoming slots:" in reply.text
+    assert f"{SLOT_LABEL} — Haircut — booked" in reply.text
+    assert "— free" in reply.text  # the remaining slots
+    assert state_of(repo, ADMIN) == "idle"
+
+
+def test_admin_appointments_lists_all_users(repo):
+    drive_to(repo, "post_booking")
+    reply = send_as(repo, ADMIN, "/appointments")
+    assert "Upcoming appointments:" in reply.text
+    assert f"{SLOT_LABEL} — Haircut — Ana Silva" in reply.text
+    assert state_of(repo, ADMIN) == "idle"
+
+
+def test_admin_lists_when_empty(repo):
+    repo.slots = {}
+    assert send_as(repo, ADMIN, "/slots").text == "No upcoming slots."
+    assert send_as(repo, ADMIN, "/appointments").text == "No upcoming appointments."
