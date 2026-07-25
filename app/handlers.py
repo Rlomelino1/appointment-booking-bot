@@ -1,18 +1,41 @@
-# handlers.py: Telegram message and callback handlers.
-# Registers handlers on the shared bot instance (from app.bot) and delegates
-# conversation logic to app.dialogue and data access to app.repository.
+# handlers.py: thin Telegram glue — no business logic.
+# One catch-all text handler feeds every message (commands included) into
+# app.dialogue.handle_message and translates the returned Reply into a
+# Telegram send: keyboard rows become a ReplyKeyboardMarkup, keyboard=None
+# removes any previous keyboard.
 
 from telebot import TeleBot
-from telebot.types import Message
+from telebot.types import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+from app import repository
+from app.dialogue import handle_message
+
+
+def _display_name(message: Message) -> str:
+    parts = [message.from_user.first_name, message.from_user.last_name]
+    return " ".join(p for p in parts if p) or "Guest"
+
+
+def _to_markup(keyboard):
+    if keyboard is None:
+        return ReplyKeyboardRemove()
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    for row in keyboard:
+        markup.row(*row)
+    return markup
 
 
 def register_handlers(bot: TeleBot) -> None:
     """Attach all message handlers to the given bot instance."""
 
-    @bot.message_handler(commands=["start"])
-    def handle_start(message: Message) -> None:
-        bot.reply_to(message, "Hello! I'm the booking bot 🤖 (under construction)")
-
     @bot.message_handler(content_types=["text"])
-    def handle_echo(message: Message) -> None:
-        bot.reply_to(message, f"You said: {message.text}")
+    def handle_text(message: Message) -> None:
+        reply = handle_message(
+            message.from_user.id,
+            message.text,
+            repository,
+            user_name=_display_name(message),
+        )
+        bot.send_message(
+            message.chat.id, reply.text, reply_markup=_to_markup(reply.keyboard)
+        )
