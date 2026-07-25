@@ -6,9 +6,10 @@
 import logging
 import os
 import re
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+
+from core.reply import Reply
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,6 @@ logger = logging.getLogger(__name__)
 # DATABASE_URL at import time — this module must stay importable with no
 # configuration at all (see tests).
 BUSINESS_TZ = ZoneInfo(os.getenv("BUSINESS_TIMEZONE", "America/Sao_Paulo"))
-
-
-@dataclass
-class Reply:
-    text: str
-    keyboard: list[list[str]] | None = None
 
 
 MAIN_MENU = [["Book an appointment"], ["My bookings"], ["Help"]]

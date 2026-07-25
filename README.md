@@ -64,9 +64,23 @@ and never stays silent.
 
 The repo is laid out for multiple bots: everything specific to one bot lives
 under `bots/<name>/`, while `core/` holds the genuinely shared infrastructure
-(config loading, the database connection helper, the webhook security
-pattern). Bot-specific env vars carry the bot's name as a prefix
-(`APPOINTMENT_BOT_TOKEN`, `APPOINTMENT_WEBHOOK_SECRET`).
+(config loading, the database connection helper, the `Reply` shape, the
+webhook security pattern). Bot-specific env vars carry the bot's name as a
+prefix (`APPOINTMENT_BOT_TOKEN`, `WEIGHT_BOT_TOKEN`, …).
+
+### Second bot: weekly weight check-ins (`bots/weight/`)
+
+A smaller bot sharing the same structure and database. `/start` subscribes
+you; every Saturday a cron service POSTs to
+`/tasks/weekly-checkin/<CRON_SECRET>` and the bot messages each active
+subscriber ("Last week: 84,2 kg"), putting them into an `awaiting_weight`
+state — the reply (comma or dot decimals) is validated, stored in
+`weigh_ins`, and answered with a trend message (down / up / steady vs the
+previous entry). `/log` records a weigh-in anytime (even while paused),
+`/history` shows the last 8 entries, `/stop` pauses check-ins without
+deleting history. Its webhook is `POST /webhook-weight/<secret>`, and it
+keeps its own `weight_conversation_state` table so a user talking to both
+bots never has one bot overwrite the other's conversation state.
 
 Conversation state lives in a `conversation_state` table (state name + JSONB
 context per user), not in process memory — so it survives restarts and doesn't
@@ -166,16 +180,20 @@ health check: `GET /health`).
 
 1. In the Render dashboard: **New → Blueprint**, pick this repo, apply.
 2. Fill in the prompted env vars (all `sync: false`, never stored in the
-   repo): `APPOINTMENT_BOT_TOKEN`, `DATABASE_URL` (any hosted Postgres — this
-   deployment uses Neon), `APPOINTMENT_WEBHOOK_SECRET`
-   (`python -c "import secrets; print(secrets.token_urlsafe(32))"`), and
-   `PUBLIC_URL` (the service's `https://….onrender.com` URL).
+   repo): `APPOINTMENT_BOT_TOKEN` and `WEIGHT_BOT_TOKEN`, `DATABASE_URL`
+   (any hosted Postgres — this deployment uses Neon),
+   `APPOINTMENT_WEBHOOK_SECRET`, `WEIGHT_WEBHOOK_SECRET`, and `CRON_SECRET`
+   (`python -c "import secrets; print(secrets.token_urlsafe(32))"` for each),
+   and `PUBLIC_URL` (the service's `https://….onrender.com` URL).
 3. Initialize the database once, locally, against the production
    `DATABASE_URL`: `python scripts/init_db.py`.
-4. After the first deploy, register the webhook once:
-   `python scripts/set_webhook.py` (with production `APPOINTMENT_BOT_TOKEN`,
-   `PUBLIC_URL`, `APPOINTMENT_WEBHOOK_SECRET` in the environment).
-5. Verify: `/health` returns `{"status": "ok"}` and the bot answers on
+4. After the first deploy, register both bots' webhooks once:
+   `python scripts/set_webhook.py` (with the production tokens, secrets, and
+   `PUBLIC_URL` in the environment).
+5. Point a scheduler (cron-job.org, a GitHub Actions cron, or a Render cron
+   job) at `POST /tasks/weekly-checkin/<CRON_SECRET>` every Saturday morning
+   to trigger the weight bot's check-ins.
+6. Verify: `/health` returns `{"status": "ok"}` and both bots answer on
    Telegram.
 
 Free-plan note: Render spins the service down after ~15 idle minutes; the

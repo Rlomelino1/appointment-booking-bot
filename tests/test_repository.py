@@ -24,6 +24,7 @@ if not TEST_DATABASE_URL:
 # imports below routes all repository connections to the test database.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("APPOINTMENT_BOT_TOKEN", "test-token")
+os.environ.setdefault("WEIGHT_BOT_TOKEN", "test-token")
 
 import psycopg2  # noqa: E402
 

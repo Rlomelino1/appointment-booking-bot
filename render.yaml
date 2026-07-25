@@ -14,9 +14,15 @@ services:
     envVars:
       - key: APPOINTMENT_BOT_TOKEN
         sync: false
+      - key: WEIGHT_BOT_TOKEN
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: APPOINTMENT_WEBHOOK_SECRET
+        sync: false
+      - key: WEIGHT_WEBHOOK_SECRET
+        sync: false
+      - key: CRON_SECRET
         sync: false
       - key: PUBLIC_URL
         sync: false

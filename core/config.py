@@ -35,11 +35,14 @@ def _optional_int(name: str):
 
 
 APPOINTMENT_BOT_TOKEN = _require("APPOINTMENT_BOT_TOKEN")
+WEIGHT_BOT_TOKEN = _require("WEIGHT_BOT_TOKEN")
 DATABASE_URL = _require("DATABASE_URL")
 
 # Webhook-only settings — not required here so polling-based local dev works
 # without them. wsgi.py and scripts/set_webhook.py validate them on startup.
 APPOINTMENT_WEBHOOK_SECRET = os.getenv("APPOINTMENT_WEBHOOK_SECRET", "")
+WEIGHT_WEBHOOK_SECRET = os.getenv("WEIGHT_WEBHOOK_SECRET", "")
+CRON_SECRET = os.getenv("CRON_SECRET", "")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "")
 
 # Optional: the single Telegram user id allowed to use admin commands.

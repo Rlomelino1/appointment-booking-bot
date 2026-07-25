@@ -8,7 +8,7 @@ from contextlib import closing
 
 from psycopg2.extras import Json, RealDictCursor
 
-from core.db import get_connection
+from core.db import get_connection, query as _query
 
 
 class SlotAlreadyBookedError(Exception):
@@ -18,14 +18,6 @@ class SlotAlreadyBookedError(Exception):
 class AppointmentNotFoundError(Exception):
     """Raised when cancelling an appointment that doesn't exist,
     belongs to another user, or is already cancelled."""
-
-
-def _query(sql, params=()):
-    """Run a single read-only query and return all rows as dicts."""
-    with closing(get_connection()) as conn:
-        with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
 
 
 # --- conversation state -----------------------------------------------------

@@ -1,33 +1,19 @@
 # handlers.py: thin Telegram glue — no business logic.
 # One catch-all text handler feeds every message (commands included) into
 # dialogue.handle_message and translates the returned Reply into a
-# Telegram send: keyboard rows become a ReplyKeyboardMarkup, keyboard=None
-# removes any previous keyboard.
+# Telegram send (see core/telegram.py for the keyboard conversion).
 
 import logging
 
 from telebot import TeleBot
-from telebot.types import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telebot.types import Message
 
 from bots.appointment import repository
 from bots.appointment.dialogue import handle_message
 from core.config import ADMIN_USER_ID
+from core.telegram import display_name, to_markup
 
 logger = logging.getLogger(__name__)
-
-
-def _display_name(message: Message) -> str:
-    parts = [message.from_user.first_name, message.from_user.last_name]
-    return " ".join(p for p in parts if p) or "Guest"
-
-
-def _to_markup(keyboard):
-    if keyboard is None:
-        return ReplyKeyboardRemove()
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    for row in keyboard:
-        markup.row(*row)
-    return markup
 
 
 def register_handlers(bot: TeleBot) -> None:
@@ -41,7 +27,7 @@ def register_handlers(bot: TeleBot) -> None:
                 user_id,
                 message.text,
                 repository,
-                user_name=_display_name(message),
+                user_name=display_name(message),
                 admin_user_id=ADMIN_USER_ID,
             )
         except Exception:
@@ -55,5 +41,5 @@ def register_handlers(bot: TeleBot) -> None:
             )
             return
         bot.send_message(
-            message.chat.id, reply.text, reply_markup=_to_markup(reply.keyboard)
+            message.chat.id, reply.text, reply_markup=to_markup(reply.keyboard)
         )
