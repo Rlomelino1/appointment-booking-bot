@@ -1,4 +1,4 @@
-# Unit tests for the dialogue state machine (app/dialogue.py).
+# Unit tests for the dialogue state machine (bots/appointment/dialogue.py).
 # Everything runs against tests/fake_repository.FakeRepository — no database,
 # no Telegram. States are reached by driving real messages through
 # handle_message, so these tests exercise the same paths users do.
@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.dialogue import handle_message
+from bots.appointment.dialogue import handle_message
 from tests.fake_repository import FakeRepository
 
 USER = 111

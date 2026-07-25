@@ -1,6 +1,6 @@
-# fake_repository.py: in-memory stand-in for app/repository.py.
+# fake_repository.py: in-memory stand-in for bots/appointment/repository.py.
 # Implements the same functions and exceptions so it can be injected into
-# app.dialogue.handle_message in unit tests. Not simulated: the time filter
+# dialogue.handle_message in unit tests. Not simulated: the time filter
 # (starts_at > now()) of the real queries — tests must seed future slots.
 
 from copy import deepcopy

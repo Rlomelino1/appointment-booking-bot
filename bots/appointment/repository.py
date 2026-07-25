@@ -8,7 +8,7 @@ from contextlib import closing
 
 from psycopg2.extras import Json, RealDictCursor
 
-from app.db import get_connection
+from core.db import get_connection
 
 
 class SlotAlreadyBookedError(Exception):

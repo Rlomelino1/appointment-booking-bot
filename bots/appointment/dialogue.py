@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 # All timestamps are stored in UTC; displays convert to the user's saved
 # timezone, falling back to this business timezone. Read directly from the
-# environment rather than app.config, which demands BOT_TOKEN/DATABASE_URL at
-# import time — this module must stay importable with no configuration at all
-# (see tests).
+# environment rather than core.config, which demands APPOINTMENT_BOT_TOKEN/
+# DATABASE_URL at import time — this module must stay importable with no
+# configuration at all (see tests).
 BUSINESS_TZ = ZoneInfo(os.getenv("BUSINESS_TIMEZONE", "America/Sao_Paulo"))
 
 

@@ -6,11 +6,11 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))  # allow `from app...` when run as a script
+sys.path.insert(0, str(PROJECT_ROOT))  # allow package imports when run as a script
 
 from contextlib import closing
 
-from app.db import get_connection
+from core.db import get_connection
 
 
 def main() -> None:

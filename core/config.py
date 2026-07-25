@@ -1,7 +1,9 @@
-# config.py: loads and validates environment variables (BOT_TOKEN, DATABASE_URL)
-# from a .env file (or the real environment) using python-dotenv.
+# config.py: loads and validates environment variables from a .env file
+# (or the real environment) using python-dotenv.
 # Fails fast at import time with a clear error if a required variable is missing,
 # so misconfiguration is caught at startup rather than mid-request.
+# Bot-specific variables are prefixed with the bot's name (APPOINTMENT_*),
+# so future bots can add their own without collisions.
 
 import os
 
@@ -20,15 +22,6 @@ def _require(name: str) -> str:
     return value
 
 
-BOT_TOKEN = _require("BOT_TOKEN")
-DATABASE_URL = _require("DATABASE_URL")
-
-# Webhook-only settings — not required here so polling-based local dev works
-# without them. wsgi.py and scripts/set_webhook.py validate them on startup.
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
-PUBLIC_URL = os.getenv("PUBLIC_URL", "")
-
-
 def _optional_int(name: str):
     value = os.getenv(name, "").strip()
     if not value:
@@ -40,6 +33,14 @@ def _optional_int(name: str):
             f"{name} must be a numeric Telegram user id, got {value!r}."
         )
 
+
+APPOINTMENT_BOT_TOKEN = _require("APPOINTMENT_BOT_TOKEN")
+DATABASE_URL = _require("DATABASE_URL")
+
+# Webhook-only settings — not required here so polling-based local dev works
+# without them. wsgi.py and scripts/set_webhook.py validate them on startup.
+APPOINTMENT_WEBHOOK_SECRET = os.getenv("APPOINTMENT_WEBHOOK_SECRET", "")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "")
 
 # Optional: the single Telegram user id allowed to use admin commands.
 # Unset -> admin commands reply "not configured".

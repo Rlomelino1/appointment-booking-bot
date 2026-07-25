@@ -1,4 +1,5 @@
-# Integration tests for app/repository.py against a real PostgreSQL database.
+# Integration tests for bots/appointment/repository.py against a real
+# PostgreSQL database.
 # They only run when TEST_DATABASE_URL points at a scratch database; otherwise
 # the whole module is skipped. Every test starts from a freshly applied
 # schema.sql and the tables are dropped again afterwards — NEVER point
@@ -18,17 +19,18 @@ if not TEST_DATABASE_URL:
         allow_module_level=True,
     )
 
-# app.config reads the environment at import time and load_dotenv() does not
+# core.config reads the environment at import time and load_dotenv() does not
 # override variables that are already set — so exporting these BEFORE the
-# app imports below routes all repository connections to the test database.
+# imports below routes all repository connections to the test database.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("APPOINTMENT_BOT_TOKEN", "test-token")
 
 import psycopg2  # noqa: E402
 
-from app import db, repository  # noqa: E402
+from bots.appointment import repository  # noqa: E402
+from core import db  # noqa: E402
 
-db.DATABASE_URL = TEST_DATABASE_URL  # belt and braces if app.config loaded earlier
+db.DATABASE_URL = TEST_DATABASE_URL  # belt and braces if core.config loaded earlier
 
 USER = 111
 SCHEMA_SQL = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()

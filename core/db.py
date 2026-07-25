@@ -5,7 +5,7 @@
 
 import psycopg2
 
-from app.config import DATABASE_URL
+from core.config import DATABASE_URL
 
 
 def get_connection():

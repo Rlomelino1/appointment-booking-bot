@@ -1,6 +1,6 @@
 # handlers.py: thin Telegram glue — no business logic.
 # One catch-all text handler feeds every message (commands included) into
-# app.dialogue.handle_message and translates the returned Reply into a
+# dialogue.handle_message and translates the returned Reply into a
 # Telegram send: keyboard rows become a ReplyKeyboardMarkup, keyboard=None
 # removes any previous keyboard.
 
@@ -9,9 +9,9 @@ import logging
 from telebot import TeleBot
 from telebot.types import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
-from app import repository
-from app.config import ADMIN_USER_ID
-from app.dialogue import handle_message
+from bots.appointment import repository
+from bots.appointment.dialogue import handle_message
+from core.config import ADMIN_USER_ID
 
 logger = logging.getLogger(__name__)
 

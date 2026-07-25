@@ -48,19 +48,25 @@ and never stays silent.
         │  HTTPS POST /webhook/<secret>          (or long-polling in dev)
         ▼
  wsgi.py — Flask + gunicorn on Render
-        │  verifies secret, parses Update, logs it
+        │  core/webhook.py: verifies secret, parses Update, logs it
         ▼
- app/handlers.py — thin Telegram glue
+ bots/appointment/handlers.py — thin Telegram glue
         │  (user_id, text, display name) in → Reply out; no business logic
         ▼
- app/dialogue.py — conversation state machine
+ bots/appointment/dialogue.py — conversation state machine
         │  pure logic: no Telegram imports, no SQL
         ▼
- app/repository.py — data-access layer, all SQL lives here
+ bots/appointment/repository.py — data-access layer, all SQL lives here
         │  transactional writes, parameterized queries
         ▼
  PostgreSQL (Neon)
 ```
+
+The repo is laid out for multiple bots: everything specific to one bot lives
+under `bots/<name>/`, while `core/` holds the genuinely shared infrastructure
+(config loading, the database connection helper, the webhook security
+pattern). Bot-specific env vars carry the bot's name as a prefix
+(`APPOINTMENT_BOT_TOKEN`, `APPOINTMENT_WEBHOOK_SECRET`).
 
 Conversation state lives in a `conversation_state` table (state name + JSONB
 context per user), not in process memory — so it survives restarts and doesn't
@@ -117,7 +123,7 @@ Long-polling (`run_polling.py`) needs no public URL, so local development
 works behind any firewall with zero setup. Production uses a webhook, which
 is push-based and lets one small web service handle traffic without a
 permanently open poll loop. Both entry points import the same pre-wired bot
-from `app/bot.py` (handlers registered exactly once, `threaded=False` so
+from `bots/appointment/bot.py` (handlers registered exactly once, `threaded=False` so
 handler exceptions surface in the request that caused them, with full
 tracebacks logged to stdout for Render's log tail). Telegram allows either
 mode, never both: `scripts/set_webhook.py --delete` switches back to polling.
@@ -128,7 +134,7 @@ mode, never both: `scripts/set_webhook.py --delete` switches back to polling.
 python -m venv venv
 venv\Scripts\Activate.ps1          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env             # then fill in BOT_TOKEN and DATABASE_URL
+copy .env.example .env             # then fill in APPOINTMENT_BOT_TOKEN and DATABASE_URL
 python scripts/init_db.py          # applies schema.sql + seed.sql
 python run_polling.py
 ```
@@ -160,15 +166,15 @@ health check: `GET /health`).
 
 1. In the Render dashboard: **New → Blueprint**, pick this repo, apply.
 2. Fill in the prompted env vars (all `sync: false`, never stored in the
-   repo): `BOT_TOKEN`, `DATABASE_URL` (any hosted Postgres — this deployment
-   uses Neon), `WEBHOOK_SECRET`
+   repo): `APPOINTMENT_BOT_TOKEN`, `DATABASE_URL` (any hosted Postgres — this
+   deployment uses Neon), `APPOINTMENT_WEBHOOK_SECRET`
    (`python -c "import secrets; print(secrets.token_urlsafe(32))"`), and
    `PUBLIC_URL` (the service's `https://….onrender.com` URL).
 3. Initialize the database once, locally, against the production
    `DATABASE_URL`: `python scripts/init_db.py`.
 4. After the first deploy, register the webhook once:
-   `python scripts/set_webhook.py` (with production `BOT_TOKEN`,
-   `PUBLIC_URL`, `WEBHOOK_SECRET` in the environment).
+   `python scripts/set_webhook.py` (with production `APPOINTMENT_BOT_TOKEN`,
+   `PUBLIC_URL`, `APPOINTMENT_WEBHOOK_SECRET` in the environment).
 5. Verify: `/health` returns `{"status": "ok"}` and the bot answers on
    Telegram.
 

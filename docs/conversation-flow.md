@@ -4,7 +4,7 @@ This document is the source of truth for the bot's dialogue state machine.
 Each Telegram user has at most one row in `conversation_state`
 (`telegram_user_id`, `state`, `context` jsonb). Every incoming message is
 interpreted according to the user's current state. The dialogue logic in
-`app/dialogue.py` is pure: it receives (user_id, text, repo) and returns a
+`bots/appointment/dialogue.py` is pure: it receives (user_id, text, repo) and returns a
 Reply — no Telegram calls, no SQL of its own.
 
 ## States
