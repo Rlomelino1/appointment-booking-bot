@@ -1,0 +1,22 @@
+# render.yaml: Render blueprint (infrastructure-as-code) for the bot.
+# Creating a Blueprint in the Render dashboard from this repo provisions the
+# web service below. Secrets are sync:false — Render will prompt for them,
+# they are never read from the repo.
+
+services:
+  - type: web
+    name: appointment-booking-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
