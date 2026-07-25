@@ -22,3 +22,8 @@ def _require(name: str) -> str:
 
 BOT_TOKEN = _require("BOT_TOKEN")
 DATABASE_URL = _require("DATABASE_URL")
+
+# Webhook-only settings — not required here so polling-based local dev works
+# without them. wsgi.py and scripts/set_webhook.py validate them on startup.
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "")

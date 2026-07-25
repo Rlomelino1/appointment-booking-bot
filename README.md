@@ -22,6 +22,10 @@ copy .env.example .env   # then edit .env and fill in BOT_TOKEN and DATABASE_URL
 
 The `venv/` directory is git-ignored — do not commit it.
 
+## Local dev vs production
+
+Locally the bot runs in **polling** mode (`python run_polling.py`): it repeatedly asks Telegram for new updates, which needs no public URL and works from behind any firewall. In production it runs in **webhook** mode: Telegram pushes each update to `POST {PUBLIC_URL}/webhook/{WEBHOOK_SECRET}`, served by `gunicorn wsgi:app` — set `WEBHOOK_SECRET` and `PUBLIC_URL`, then register the URL once with `python scripts/set_webhook.py`. Telegram allows either a webhook or polling, never both, so run `python scripts/set_webhook.py --delete` before switching back to local polling. `GET /health` returns `{"status": "ok"}` for Render health checks and uptime monitors.
+
 ## Running tests
 
 ```powershell
