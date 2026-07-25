@@ -1,14 +1,20 @@
-# Appointment Booking Bot
+# Telegram Bots
 
-A Telegram bot that walks users through booking an appointment — pick a service, pick a time, confirm — with race-safe booking guaranteed at the database level.
-
-**Live bot: [t.me/ApBookingBot](https://t.me/ApBookingBot)**
+A small collection of Telegram bots sharing one codebase, one PostgreSQL
+database, and one deployment. Each bot lives in its own package under
+`bots/`; genuinely shared infrastructure (config, database access, webhook
+security) lives in `core/`; a single Flask app serves every bot's webhook
+from one free Render service.
 
 Python 3.12 · Flask · pyTelegramBotAPI · PostgreSQL (Neon) · pytest · Render
 
-## Demo
+## The bots
 
-Every step is driven by tappable reply-keyboard buttons; free text works too.
+### Appointment Booking — [t.me/ApBookingBot](https://t.me/ApBookingBot)
+
+Walks users through booking an appointment — pick a service, pick a time,
+confirm — with race-safe booking guaranteed at the database level. Every step
+is driven by tappable reply-keyboard buttons; free text works too.
 
 ```
 You:  /start
@@ -36,69 +42,105 @@ You:  Confirm
 Bot:  ✅ Booked! Haircut on Mon 27 Jul, 14:00 (UTC-3) under Ana Silva.
 ```
 
-`/mybookings` lists confirmed appointments and lets the user cancel one (with
-a confirmation step); `/cancel` abandons any flow; unrecognized input always
-gets a re-prompt showing the valid options — the bot never crashes on input
-and never stays silent.
-
-## Architecture
-
-```
- Telegram servers
-        │  HTTPS POST /webhook/<secret>          (or long-polling in dev)
-        ▼
- wsgi.py — Flask + gunicorn on Render
-        │  core/webhook.py: verifies secret, parses Update, logs it
-        ▼
- bots/appointment/handlers.py — thin Telegram glue
-        │  (user_id, text, display name) in → Reply out; no business logic
-        ▼
- bots/appointment/dialogue.py — conversation state machine
-        │  pure logic: no Telegram imports, no SQL
-        ▼
- bots/appointment/repository.py — data-access layer, all SQL lives here
-        │  transactional writes, parameterized queries
-        ▼
- PostgreSQL (Neon)
-```
-
-The repo is laid out for multiple bots: everything specific to one bot lives
-under `bots/<name>/`, while `core/` holds the genuinely shared infrastructure
-(config loading, the database connection helper, the `Reply` shape, the
-webhook security pattern). Bot-specific env vars carry the bot's name as a
-prefix (`APPOINTMENT_BOT_TOKEN`, `WEIGHT_BOT_TOKEN`, …).
-
-### Second bot: weekly weight check-ins (`bots/weight/`)
-
-A smaller bot sharing the same structure and database. `/start` subscribes
-you; every Saturday a cron service POSTs to
-`/tasks/weekly-checkin/<CRON_SECRET>` and the bot messages each active
-subscriber ("Last week: 84,2 kg"), putting them into an `awaiting_weight`
-state — the reply (comma or dot decimals) is validated, stored in
-`weigh_ins`, and answered with a trend message (down / up / steady vs the
-previous entry). `/log` records a weigh-in anytime (even while paused),
-`/history` shows the last 8 entries, `/stop` pauses check-ins without
-deleting history. Its webhook is `POST /webhook-weight/<secret>`, and it
-keeps its own `weight_conversation_state` table so a user talking to both
-bots never has one bot overwrite the other's conversation state.
-
-Conversation state lives in a `conversation_state` table (state name + JSONB
-context per user), not in process memory — so it survives restarts and doesn't
-care which gunicorn worker handles the next message. The full state machine
+`/mybookings` lists confirmed appointments and lets the user cancel one;
+`/timezone` sets a per-user display timezone; `/cancel` abandons any flow;
+unrecognized input always gets a re-prompt showing the valid options. Admin
+commands (`/addslot`, `/slots`, `/appointments`) are restricted to a single
+configured user id — for anyone else they fall through to the normal
+fallback, so their existence is never revealed. The full state machine
 (states, transitions, edge cases) is specified in
 [docs/conversation-flow.md](docs/conversation-flow.md), which was written
 before the code and is kept authoritative.
 
+### Weight Tracker
+
+A personal-use bot for weekly weight tracking. `/start` subscribes you;
+every Saturday it messages each active subscriber ("Last week: 84,2 kg") and
+logs the numeric reply, answering with a trend message (down / up / steady
+vs the previous entry). `/log` records a weigh-in anytime — even while
+check-ins are paused with `/stop` — and `/history` shows the last 8 entries.
+It is not published for general use; it runs for the operator and people
+they invite.
+
+## Repository layout
+
+```
+bots/
+├── appointment/        # bot.py, handlers.py, dialogue.py, repository.py
+└── weight/             # same structure
+core/
+├── config.py           # env loading/validation
+├── db.py               # psycopg2 connection helper + query()
+├── reply.py            # the Reply dataclass every dialogue returns
+├── telegram.py         # keyboard/markup glue for handlers
+└── webhook.py          # webhook secret check + Update parsing
+tests/                  # unit tests (fake repositories) + gated integration tests
+wsgi.py                 # ONE Flask app: one webhook route per bot + /tasks + /health
+run_polling.py          # local dev entry point (appointment bot)
+scripts/                # init_db.py, set_webhook.py (registers all bots)
+schema.sql              # all tables, IF NOT EXISTS — safe to re-apply
+```
+
+Each bot follows the same internal shape: `bot.py` builds its telebot
+instance and registers handlers once; `handlers.py` is thin Telegram glue;
+`dialogue.py` is a pure state machine (no Telegram imports, no SQL) taking an
+injected repository; `repository.py` owns all of that bot's SQL. One Flask
+app (`wsgi.py`) exposes one webhook route per bot (`/webhook/<secret>`,
+`/webhook-weight/<secret>`), each feeding its own telebot instance — so a
+single free Render service hosts everything. Bots keep separate
+conversation-state tables so a user talking to two bots never has one bot
+overwrite the other's state.
+
+## Scheduled triggers
+
+The weight bot's Saturday check-in is not a background job inside the app.
+Free-tier hosting can't run persistent schedulers reliably: the service spins
+down after ~15 idle minutes, so an in-process scheduler (cron thread, APScheduler)
+would simply not be running when its moment arrives. Instead, the app exposes
+a protected endpoint — `POST /tasks/weekly-checkin/<CRON_SECRET>` — and an
+external free cron service (cron-job.org, a GitHub Actions schedule, etc.)
+calls it every Saturday morning. The call wakes the service if needed, the
+endpoint does the work synchronously and returns `{"messaged": n}`, and the
+secret path segment gets the same constant-time comparison as the Telegram
+webhooks.
+
+## Environment variables
+
+| Variable                     | Required            | Purpose                                                      |
+|------------------------------|---------------------|--------------------------------------------------------------|
+| `APPOINTMENT_BOT_TOKEN`      | yes                 | Appointment bot's token from @BotFather                      |
+| `WEIGHT_BOT_TOKEN`           | yes                 | Weight bot's token from @BotFather                           |
+| `DATABASE_URL`               | yes                 | PostgreSQL connection string (this deployment uses Neon)     |
+| `APPOINTMENT_WEBHOOK_SECRET` | webhook mode        | Random string in the appointment bot's webhook path          |
+| `WEIGHT_WEBHOOK_SECRET`      | webhook mode        | Random string in the weight bot's webhook path               |
+| `CRON_SECRET`                | webhook mode        | Protects `POST /tasks/weekly-checkin/<secret>`               |
+| `PUBLIC_URL`                 | webhook mode        | Public https base URL, e.g. `https://….onrender.com`         |
+| `BUSINESS_TIMEZONE`          | no (São Paulo)      | Fallback display timezone (IANA name) when a user has none   |
+| `ADMIN_USER_ID`              | no                  | Telegram user id allowed to use the appointment admin commands |
+
+Generate secrets with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+"Webhook mode" variables are validated at wsgi startup (fail fast); local
+polling runs without them.
+
+## Data storage
+
+The weight tracker stores each user's weigh-in history — weight and
+timestamp, keyed by Telegram user id — in the operator's PostgreSQL
+database. The data is not shared with anyone and is used only to compute the
+week-over-week messages the user sees; `/stop` pauses check-ins without
+deleting anything, and a user can ask the operator to delete their history
+entirely.
+
 ## Key design decisions
 
-**The dialogue logic is pure and dependency-injected.**
-`handle_message(user_id, text, repo) -> Reply` touches neither Telegram nor
-the database directly: the repository is passed in as a parameter, and the
-returned `Reply` is a plain dataclass (text + keyboard rows). That one seam is
-why the state machine has 51 unit tests that run in ~0.1 s against an
-in-memory fake repository — every transition, fallback, and race scenario is
-tested without a database or network. It also means the Telegram layer
-(`handlers.py`) stays a ~20-line adapter that is boring by design.
+**Dialogue logic is pure and dependency-injected.**
+Each bot's `handle_message(user_id, text, repo) -> Reply` touches neither
+Telegram nor the database directly: the repository is passed in as a
+parameter, and the returned `Reply` is a plain dataclass (text + keyboard
+rows). That one seam is why the state machines have 110+ unit tests that run
+in under half a second against in-memory fake repositories — every
+transition, fallback, and race scenario tested without a database or
+network — and why `handlers.py` stays a boring ~20-line adapter in both bots.
 
 **Double-booking is prevented at the SQL level, not in application code.**
 A check-then-insert in Python would race: two users can both see a slot as
@@ -113,34 +155,30 @@ of double-freeing the slot.
 
 **Webhook security via a secret path.**
 Anyone can POST to a public URL, and a forged request body looks exactly like
-a Telegram update. The webhook is therefore mounted at `/webhook/<secret>`,
-where the secret is a random 256-bit string known only to Telegram (via
+a Telegram update. Every webhook (and the cron endpoint) is therefore mounted
+at a path containing a random 256-bit secret known only to Telegram (via
 `setWebhook`) and the server. The comparison uses `hmac.compare_digest` to
 avoid timing side-channels; wrong secrets get a 403 and are never parsed.
 
 **Store UTC, display local time.**
 All timestamps are stored in UTC (`timestamptz`); conversion to human time
-happens only at display, in a single formatting function. Each user can pick
-their own display timezone with `/timezone` (presets or any IANA name,
-validated with `zoneinfo` and stored in `user_settings`); without a setting,
-a `BUSINESS_TIMEZONE` env var (default `America/Sao_Paulo`) applies. Every
-rendered time carries its zone — e.g. `Fri 31 Jul, 07:00 (UTC-3)` — and
-admin-typed slot times are interpreted as business-timezone local and
-converted to UTC before storage, so the database never contains an ambiguous
-timestamp. The suffix shows tzdata's letter
-abbreviation where one exists (CET, PST); for zones where the IANA database
-dropped abbreviations (Brazil's BRT was retired in 2019) it falls back to the
-plain UTC offset.
+happens only at display, in a single formatting function. Appointment-bot
+users can pick their own display timezone with `/timezone` (presets or any
+IANA name, validated with `zoneinfo`); without a setting, `BUSINESS_TIMEZONE`
+applies. Every rendered time carries its zone — e.g. `Fri 31 Jul, 07:00
+(UTC-3)` — and admin-typed slot times are interpreted as business-timezone
+local and converted to UTC before storage, so the database never contains an
+ambiguous timestamp.
 
 **Polling in dev, webhook in prod.**
 Long-polling (`run_polling.py`) needs no public URL, so local development
-works behind any firewall with zero setup. Production uses a webhook, which
-is push-based and lets one small web service handle traffic without a
-permanently open poll loop. Both entry points import the same pre-wired bot
-from `bots/appointment/bot.py` (handlers registered exactly once, `threaded=False` so
-handler exceptions surface in the request that caused them, with full
-tracebacks logged to stdout for Render's log tail). Telegram allows either
-mode, never both: `scripts/set_webhook.py --delete` switches back to polling.
+works behind any firewall with zero setup. Production uses webhooks, which
+are push-based and let one small web service handle all bots. Each bot's
+entry point imports its pre-wired instance from `bots/<name>/bot.py`
+(handlers registered exactly once, `threaded=False` so handler exceptions
+surface in the request that caused them, with full tracebacks logged to
+stdout for Render's log tail). Telegram allows either mode per bot, never
+both: `scripts/set_webhook.py --delete` switches back to polling.
 
 ## Setup
 
@@ -148,29 +186,30 @@ mode, never both: `scripts/set_webhook.py --delete` switches back to polling.
 python -m venv venv
 venv\Scripts\Activate.ps1          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env             # then fill in APPOINTMENT_BOT_TOKEN and DATABASE_URL
+copy .env.example .env             # then fill in the tokens and DATABASE_URL
 python scripts/init_db.py          # applies schema.sql + seed.sql
-python run_polling.py
+python run_polling.py              # appointment bot, long-polling
 ```
 
-## Testing
+## Running tests
 
 ```powershell
-# Unit tests (dialogue state machine — no database or bot token needed)
-python -m pytest tests/test_dialogue.py
+# Unit tests (state machines + route guards — no real database needed)
+python -m pytest
 
-# Full suite, including repository integration tests against PostgreSQL
+# Include repository integration tests against PostgreSQL
 $env:TEST_DATABASE_URL = "postgresql://user:pass@localhost:5432/booking_test"
 python -m pytest
 ```
 
-Unit tests drive real message scripts through the state machine against
-`tests/fake_repository.py` and cover the happy path, `/cancel` in every state,
-invalid input in every state (state must not change), and slot-taken races.
-Integration tests in `tests/test_repository.py` verify the transactional
-booking/cancelling behavior against a real PostgreSQL database; they run only
-when `TEST_DATABASE_URL` is set and are skipped otherwise. They drop and
-recreate all tables around every test — use a dedicated scratch database.
+Unit tests drive real message scripts through both bots' state machines
+against in-memory fakes (`tests/fake_repository.py`,
+`tests/fake_weight_repository.py`) and check the webhook/cron routes reject
+wrong secrets. Integration tests in `tests/test_repository.py` verify the
+transactional booking/cancelling behavior against a real PostgreSQL database;
+they run only when `TEST_DATABASE_URL` is set and are skipped otherwise. They
+drop and recreate all tables around every test — use a dedicated scratch
+database.
 
 ## Deployment
 
@@ -180,19 +219,14 @@ health check: `GET /health`).
 
 1. In the Render dashboard: **New → Blueprint**, pick this repo, apply.
 2. Fill in the prompted env vars (all `sync: false`, never stored in the
-   repo): `APPOINTMENT_BOT_TOKEN` and `WEIGHT_BOT_TOKEN`, `DATABASE_URL`
-   (any hosted Postgres — this deployment uses Neon),
-   `APPOINTMENT_WEBHOOK_SECRET`, `WEIGHT_WEBHOOK_SECRET`, and `CRON_SECRET`
-   (`python -c "import secrets; print(secrets.token_urlsafe(32))"` for each),
-   and `PUBLIC_URL` (the service's `https://….onrender.com` URL).
+   repo) — see the table above.
 3. Initialize the database once, locally, against the production
    `DATABASE_URL`: `python scripts/init_db.py`.
 4. After the first deploy, register both bots' webhooks once:
    `python scripts/set_webhook.py` (with the production tokens, secrets, and
    `PUBLIC_URL` in the environment).
 5. Point a scheduler (cron-job.org, a GitHub Actions cron, or a Render cron
-   job) at `POST /tasks/weekly-checkin/<CRON_SECRET>` every Saturday morning
-   to trigger the weight bot's check-ins.
+   job) at `POST /tasks/weekly-checkin/<CRON_SECRET>` every Saturday morning.
 6. Verify: `/health` returns `{"status": "ok"}` and both bots answer on
    Telegram.
 
